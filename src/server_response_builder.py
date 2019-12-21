@@ -31,7 +31,7 @@ class ServerResponseBuilder:
         element_tree.register_namespace("ds", "http://www.w3.org/2000/09/xmldsig#")
         element_tree.register_namespace("enc", "http://www.w3.org/2001/04/xmlenc#")
 
-    def fixup_document(self, drm_system, system_id, kid, content_id, iv):
+    def fixup_document(self, drm_system, system_id, kid, content_id):
         """
         Update the returned XML document based on the specified system ID
         """
@@ -62,8 +62,8 @@ class ServerResponseBuilder:
             system_id = drm_system.get("systemId")
             system_ids[system_id] = kid
             iv = base64.b64encode(self.hls_aes_lib.gen_iv(content_id, kid)).decode('utf-8')
-            self.fixup_document(drm_system, system_id, kid, content_id, iv)
-            explicitIV = base64.b64encode(iv.encode("utf-8")).decode('utf-8')
+            self.fixup_document(drm_system, system_id, kid, content_id)
+            explicitIV = iv.encode("utf-8").decode('utf-8')
 
         for content_key_tag in content_keys:
             init_vector = content_key_tag.get("explicitIV")
