@@ -17,7 +17,7 @@ class Util:
       last = x + 2
       seed_bytes += int(s[x:last], 16).to_bytes(1, "big")
     return seed_bytes
-  
+
   @staticmethod
   def bin_to_hex_str(s):
     hex_arr = ["{:02x}".format(x) for x in s]

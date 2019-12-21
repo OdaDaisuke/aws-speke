@@ -4,15 +4,14 @@ import logging
 import sys
 import traceback
 
-from flask import Flask
 from server_response_builder import ServerResponseBuilder
-
-app = Flask(__name__)
 
 def server_handler(event, context):
     try:
         body = event['body']
-        body = base64.b64decode(body)
+        print(body)
+        if event["isBase64Encoded"]:
+            body = base64.b64decode(body)
         response = ServerResponseBuilder(body).get_response()
         return response
     except Exception as exception:

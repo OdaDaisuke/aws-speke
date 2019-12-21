@@ -18,9 +18,8 @@ class ServerResponseBuilder:
     def __init__(self, request_body):
         self.root = element_tree.fromstring(request_body)
 
-        lib_factory = LibFactory(config)
-        self.hls_aes_lib = HLSAesLib
-        self.key_generator = KeyGenerator
+        self.hls_aes_lib = HLSAesLib()
+        self.key_generator = KeyGenerator()
         element_tree.register_namespace("cpix", "urn:dashif:org:cpix")
         element_tree.register_namespace("pskc", "urn:ietf:params:xml:ns:keyprov:pskc")
         element_tree.register_namespace("speke", "urn:aws:amazon:com:speke")
@@ -32,10 +31,10 @@ class ServerResponseBuilder:
         Update the returned XML document based on the specified system ID
         """
         if system_id.lower() == HLS_AES_128_SYSTEM_ID.lower():
-            ext_x_key = self.hls_aes_lib.build_key_URI(content_id, kid, iv)
+            ext_x_key = self.hls_aes_lib.build_key_uri(content_id, kid)
             drm_system.find("{urn:dashif:org:cpix}URIExtXKey").text = base64.b64encode(ext_x_key.encode("utf-8")).decode("utf-8")
-            drm_system.find("{urn:aws:amazon:com:speke}KeyFormat").text = base64.b64encode(HLS_AES_128_KEY_FORMAT).decode("utf-8")
-            drm_system.find("{urn:aws:amazon:com:speke}KeyFormatVersions").text = base64.b64encode(HLS_AES_128_KEY_FORMAT_VERSIONS).decode("utf-8")
+            drm_system.find("{urn:aws:amazon:com:speke}KeyFormat").text = base64.b64encode(HLS_AES_128_KEY_FORMAT.encode("utf-8")).decode("utf-8")
+            drm_system.find("{urn:aws:amazon:com:speke}KeyFormatVersions").text = base64.b64encode(HLS_AES_128_KEY_FORMAT_VERSIONS.encode("utf-8")).decode("utf-8")
             self.safe_remove(drm_system, "{urn:dashif:org:cpix}ContentProtectionData")
             self.safe_remove(drm_system, "{urn:aws:amazon:com:speke}ProtectionHeader")
             self.safe_remove(drm_system, "{urn:dashif:org:cpix}PSSH")
@@ -45,6 +44,7 @@ class ServerResponseBuilder:
     def fill_request(self):
         content_id = self.root.get("id")
         system_ids = {}
+        explicitIV = None
 
         content_keys = self.root.findall("./{urn:dashif:org:cpix}ContentKeyList/{urn:dashif:org:cpix}ContentKey")
 
@@ -52,21 +52,20 @@ class ServerResponseBuilder:
             kid = drm_system.get("kid")
             system_id = drm_system.get("systemId")
             system_ids[system_id] = kid
-            logging.info("ContentID")
-            logging.info(content_id)
             iv = base64.b64encode(self.hls_aes_lib.gen_iv(content_id, kid)).decode('utf-8')
             self.fixup_document(drm_system, system_id, kid, content_id, iv)
+            explicitIV = base64.b64encode(iv.encode("utf-8")).decode('utf-8')
 
         for content_key_tag in content_keys:
             init_vector = content_key_tag.get("explicitIV")
             # explicitIVはHLS AESまたはSAMPLE AES(Fairplay)の場合必要
-            if init_vector is None and system_ids.get(config.HLS_AES_128_SYSTEM_ID, False) == kid:
-                content_key_tag.set('explicitIV', base64.b64encode(self.hls_aes_lib.gen_iv(content_id, kid)).decode('utf-8'))
+            if init_vector is None and system_ids.get(HLS_AES_128_SYSTEM_ID, False) == kid:
+                content_key_tag.set('explicitIV', explicitIV)
 
             data = element_tree.SubElement(content_key_tag, "{urn:dashif:org:cpix}Data")
             secret = element_tree.SubElement(data, "{urn:ietf:params:xml:ns:keyprov:pskc}Secret")
             plain_value = element_tree.SubElement(secret, "{urn:ietf:params:xml:ns:keyprov:pskc}PlainValue")
-            key = self.key_generator.gen_content_key(key)
+            key = self.key_generator.gen_content_key(kid)
             # キーを指定
             plain_value.text = base64.b64encode(key).decode('utf-8')
 
@@ -75,6 +74,8 @@ class ServerResponseBuilder:
         Get the key request response as an HTTP response.
         """
         self.fill_request()
+        body = base64.b64encode(element_tree.tostring(self.root)).decode('utf-8')
+        print(body)
         return {
             "isBase64Encoded": True,
             "statusCode": 200,
@@ -85,7 +86,7 @@ class ServerResponseBuilder:
                 "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
                 "Speke-User-Agent": "oda-key-server"
             },
-            "body": base64.b64encode(element_tree.tostring(self.root)).decode('utf-8')
+            "body": body
         }
 
     def safe_remove(self, element, match):
@@ -93,4 +94,4 @@ class ServerResponseBuilder:
         if elm_instance is not None:
             element.remove(elm_instance)
         else:
-            logging.warning("not match xml", match)
+            print("not match xml", match)
