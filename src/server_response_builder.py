@@ -1,11 +1,15 @@
 import base64
 import xml.etree.ElementTree as element_tree
 import string
-
+import os
+import boto3
 from util import Util
 from hls_aes import HLSAesLib
 from key_generator import KeyGenerator
 
+s3_client = boto3.client("s3")
+
+KEY_STORE_BUCKET = os.environ["KEY_STORE_BUCKET"]
 HLS_AES_128_SYSTEM_ID = '81376844-f976-481e-a84e-cc25d39b0b33'
 HLS_AES_128_KEY_FORMAT = 'identity'
 HLS_AES_128_KEY_FORMAT_VERSIONS = '1'
@@ -14,6 +18,7 @@ HLS_AES_128_KEY_FORMAT_VERSIONS = '1'
 CPIX XMLドキュメントを組み立てて返す
 """
 class ServerResponseBuilder:
+    key = ""
 
     def __init__(self, request_body):
         self.root = element_tree.fromstring(request_body)
@@ -31,8 +36,11 @@ class ServerResponseBuilder:
         Update the returned XML document based on the specified system ID
         """
         if system_id.lower() == HLS_AES_128_SYSTEM_ID.lower():
-            ext_x_key = self.hls_aes_lib.build_key_uri(content_id, kid)
-            drm_system.find("{urn:dashif:org:cpix}URIExtXKey").text = base64.b64encode(ext_x_key.encode("utf-8")).decode("utf-8")
+            uri = self.hls_aes_lib.build_key_uri(content_id, kid)
+            ext_x_key = uri["uri"]
+            object_key = uri["key"]
+            s3_client.put_object(Body=Util.bin_to_hex_str(self.key).encode("utf-8"), Bucket=KEY_STORE_BUCKET, Key=object_key)
+            drm_system.find("{urn:dashif:org:cpix}URIExtXKey").text = ext_x_key
             drm_system.find("{urn:aws:amazon:com:speke}KeyFormat").text = base64.b64encode(HLS_AES_128_KEY_FORMAT.encode("utf-8")).decode("utf-8")
             drm_system.find("{urn:aws:amazon:com:speke}KeyFormatVersions").text = base64.b64encode(HLS_AES_128_KEY_FORMAT_VERSIONS.encode("utf-8")).decode("utf-8")
             self.safe_remove(drm_system, "{urn:dashif:org:cpix}ContentProtectionData")
@@ -50,6 +58,7 @@ class ServerResponseBuilder:
 
         for drm_system in self.root.findall("./{urn:dashif:org:cpix}DRMSystemList/{urn:dashif:org:cpix}DRMSystem"):
             kid = drm_system.get("kid")
+            self.key = self.key_generator.gen_content_key(kid)
             system_id = drm_system.get("systemId")
             system_ids[system_id] = kid
             iv = base64.b64encode(self.hls_aes_lib.gen_iv(content_id, kid)).decode('utf-8')
@@ -65,9 +74,8 @@ class ServerResponseBuilder:
             data = element_tree.SubElement(content_key_tag, "{urn:dashif:org:cpix}Data")
             secret = element_tree.SubElement(data, "{urn:ietf:params:xml:ns:keyprov:pskc}Secret")
             plain_value = element_tree.SubElement(secret, "{urn:ietf:params:xml:ns:keyprov:pskc}PlainValue")
-            key = self.key_generator.gen_content_key(kid)
             # キーを指定
-            plain_value.text = base64.b64encode(key).decode('utf-8')
+            plain_value.text = base64.b64encode(self.key).decode('utf-8')
 
     def get_response(self):
         """
